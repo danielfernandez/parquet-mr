@@ -609,6 +609,31 @@ public class ParquetFileReader implements Closeable {
     return new ParquetFileReader(file, options);
   }
 
+  /**
+   * Open a {@link InputFile file}.
+   *
+   * @param file an input file
+   * @param footer a footer for the file if already loaded
+   * @return an open ParquetFileReader
+   * @throws IOException if there is an error while opening the file
+   */
+  public static ParquetFileReader open(InputFile file, ParquetMetadata footer) throws IOException {
+    return new ParquetFileReader(file, ParquetReadOptions.builder().build(), footer);
+  }
+
+  /**
+   * Open a {@link InputFile file} with {@link ParquetReadOptions options}.
+   *
+   * @param file an input file
+   * @param options parquet read options
+   * @param footer a footer for the file if already loaded
+   * @return an open ParquetFileReader
+   * @throws IOException if there is an error while opening the file
+   */
+  public static ParquetFileReader open(InputFile file, ParquetReadOptions options, ParquetMetadata footer) throws IOException {
+    return new ParquetFileReader(file, options, footer);
+  }
+
   private final InputFile file;
   private final SeekableInputStream f;
   private final ParquetReadOptions options;
@@ -704,23 +729,27 @@ public class ParquetFileReader implements Closeable {
   }
 
   public ParquetFileReader(InputFile file, ParquetReadOptions options) throws IOException {
+    this(file, options, null);
+  }
+
+  public ParquetFileReader(InputFile file, ParquetReadOptions options, ParquetMetadata footer) throws IOException {
     this.converter = new ParquetMetadataConverter(options);
     this.file = file;
     this.f = file.newStream();
     this.options = options;
     try {
-      this.footer = readFooter(file, options, f, converter);
+      this.footer = (footer != null) ? footer : readFooter(file, options, f, converter);
     } catch (Exception e) {
       // In case that reading footer throws an exception in the constructor, the new stream
       // should be closed. Otherwise, there's no way to close this outside.
       f.close();
       throw e;
     }
-    this.fileMetaData = footer.getFileMetaData();
-    this.blocks = filterRowGroups(footer.getBlocks());
+    this.fileMetaData = this.footer.getFileMetaData();
+    this.blocks = filterRowGroups(this.footer.getBlocks());
     this.blockIndexStores = listWithNulls(this.blocks.size());
     this.blockRowRanges = listWithNulls(this.blocks.size());
-    for (ColumnDescriptor col : footer.getFileMetaData().getSchema().getColumns()) {
+    for (ColumnDescriptor col : this.footer.getFileMetaData().getSchema().getColumns()) {
       paths.put(ColumnPath.get(col.getPath()), col);
     }
     this.crc = options.usePageChecksumVerification() ? new CRC32() : null;

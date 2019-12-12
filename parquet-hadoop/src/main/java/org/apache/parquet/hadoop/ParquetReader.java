@@ -39,6 +39,7 @@ import org.apache.parquet.filter.UnboundRecordFilter;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.compat.FilterCompat.Filter;
 import org.apache.parquet.hadoop.api.ReadSupport;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.HadoopReadOptions;
 import org.apache.parquet.hadoop.util.HiddenFileFilter;
@@ -53,6 +54,7 @@ public class ParquetReader<T> implements Closeable {
   private final ReadSupport<T> readSupport;
   private final Iterator<InputFile> filesIterator;
   private final ParquetReadOptions options;
+  private final ParquetMetadata footer;
 
   private InternalParquetRecordReader<T> reader;
 
@@ -109,6 +111,7 @@ public class ParquetReader<T> implements Closeable {
                         ReadSupport<T> readSupport,
                         FilterCompat.Filter filter) throws IOException {
     this(Collections.singletonList((InputFile) HadoopInputFile.fromPath(file, conf)),
+        null, // footer
         HadoopReadOptions.builder(conf)
             .withRecordFilter(checkNotNull(filter, "filter"))
             .build(),
@@ -116,10 +119,12 @@ public class ParquetReader<T> implements Closeable {
   }
 
   private ParquetReader(List<InputFile> files,
+                        ParquetMetadata footer,
                         ParquetReadOptions options,
                         ReadSupport<T> readSupport) throws IOException {
     this.readSupport = readSupport;
     this.options = options;
+    this.footer = footer; // might be null
     this.filesIterator = files.iterator();
   }
 
@@ -149,7 +154,7 @@ public class ParquetReader<T> implements Closeable {
     if (filesIterator.hasNext()) {
       InputFile file = filesIterator.next();
 
-      ParquetFileReader fileReader = ParquetFileReader.open(file, options);
+      ParquetFileReader fileReader = ParquetFileReader.open(file, options, footer);
 
       reader = new InternalParquetRecordReader<>(readSupport, options.getRecordFilter());
 
@@ -179,6 +184,7 @@ public class ParquetReader<T> implements Closeable {
     private Filter filter = null;
     protected Configuration conf;
     private ParquetReadOptions.Builder optionsBuilder;
+    private ParquetMetadata footer = null;
 
     @Deprecated
     private Builder(ReadSupport<T> readSupport, Path path) {
@@ -305,6 +311,11 @@ public class ParquetReader<T> implements Closeable {
       return this;
     }
 
+    public Builder<T> withFooter(final ParquetMetadata footer) {
+      this.footer = footer;
+      return this;
+    }
+
     protected ReadSupport<T> getReadSupport() {
       // if readSupport is null, the protected constructor must have been used
       Preconditions.checkArgument(readSupport != null,
@@ -322,6 +333,7 @@ public class ParquetReader<T> implements Closeable {
         if (stat.isFile()) {
           return new ParquetReader<>(
               Collections.singletonList((InputFile) HadoopInputFile.fromStatus(stat, conf)),
+              footer,
               options,
               getReadSupport());
 
@@ -330,11 +342,11 @@ public class ParquetReader<T> implements Closeable {
           for (FileStatus fileStatus : fs.listStatus(path, HiddenFileFilter.INSTANCE)) {
             files.add(HadoopInputFile.fromStatus(fileStatus, conf));
           }
-          return new ParquetReader<T>(files, options, getReadSupport());
+          return new ParquetReader<T>(files, footer, options, getReadSupport());
         }
 
       } else {
-        return new ParquetReader<>(Collections.singletonList(file), options, getReadSupport());
+        return new ParquetReader<>(Collections.singletonList(file), footer, options, getReadSupport());
       }
     }
   }
